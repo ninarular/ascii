@@ -1,0 +1,20 @@
+{
+  "name": "objhosting",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node server.js",
+    "vite": "vite",
+    "build": "vite build",
+    "preview": "NODE_ENV=production node server.js"
+  },
+  "devDependencies": {
+    "vite": "^7.0.0"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "lil-gui": "^0.20.0",
+    "three": "^0.177.0"
+  }
+}
