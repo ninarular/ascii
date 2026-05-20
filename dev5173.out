@@ -1,0 +1,5 @@
+
+> objhosting@0.0.0 dev
+> node server.js
+
+Ascii Visualizer running at http://127.0.0.1:5173/

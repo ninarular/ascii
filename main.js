@@ -61,6 +61,19 @@ loaderDiv.style.borderRadius = '50%';
 loaderDiv.style.animation = 'spin 1s linear infinite';
 document.body.appendChild(loaderDiv);
 
+const downloadCallout = document.createElement('div');
+downloadCallout.textContent = '';
+downloadCallout.style.position = 'fixed';
+downloadCallout.style.top = '12px';
+downloadCallout.style.left = '12px';
+downloadCallout.style.zIndex = '20';
+downloadCallout.style.fontFamily = 'monospace';
+downloadCallout.style.fontSize = '14px';
+downloadCallout.style.color = 'white';
+downloadCallout.style.textShadow = '0 1px 2px rgba(0, 0, 0, 0.9)';
+downloadCallout.style.pointerEvents = 'none';
+document.body.appendChild(downloadCallout);
+
 // Add spinner animation style
 const style = document.createElement('style');
 style.textContent = `
@@ -87,7 +100,8 @@ pointLight.position.set(2, 2, 2);
 scene.add(pointLight);
 
 const defaultSceneBackground = scene.background;
-const videoSceneBackground = new THREE.Color('black');
+const darkVideoSceneBackground = new THREE.Color('black');
+const lightVideoSceneBackground = new THREE.Color('white');
 const videoPlaneDistance = 1;
 const videoFillMode = 'cover';
 let previousSceneBackground = defaultSceneBackground;
@@ -156,6 +170,7 @@ const asciiSettings = {
   asciiColor: false,
   resolutionScale: 1,
   webcam: false,
+  videoWhiteBackground: false,
   widthScale: 1,
   heightScale: 1,
   exportDuration: 10,
@@ -179,6 +194,7 @@ gui.add(asciiSettings, 'resolutionScale', 0.1, 2).step(0.1).name('ASCII Resoluti
 gui.add(asciiSettings, 'widthScale', 0.5, 2).step(0.1).name('Width Scale').onChange(updateAsciiDisplaySize);
 gui.add(asciiSettings, 'heightScale', 0.5, 2).step(0.1).name('Height Scale').onChange(updateAsciiDisplaySize);
 gui.add(asciiSettings, 'webcam').name('Use Webcam for ASCII').onChange(toggleWebcamAscii);
+gui.add(asciiSettings, 'videoWhiteBackground').name('White Video Background').onChange(updateVideoPresentation);
 gui.add(asciiSettings, 'exportDuration', 1, 120).step(1).name('Export Duration (s)');
 gui.add(asciiSettings, 'uploadMp4').name('Upload MP4 Video');
 gui.add(asciiSettings, 'downloadRenderedVideo').name('Download Rendered Video');
@@ -202,6 +218,7 @@ function updateAsciiColorMode(useColor) {
   effect = createAsciiEffect(useColor);
   previousEffect.domElement.replaceWith(effect.domElement);
   updateAsciiDisplaySize();
+  updateVideoPresentation();
 
   updateRenderVisibility();
 }
@@ -290,6 +307,7 @@ function setVideoSource(video) {
   videoPlane.position.set(0, 0, -videoPlaneDistance);
   camera.add(videoPlane);
 
+  updateVideoPresentation();
   startAnimation();
 }
 
@@ -305,7 +323,7 @@ function loadYouTubeUrl(url) {
   removeLoader();
 
   const video = document.createElement('video');
-  video.src = `/api/youtube-stream?url=${encodeURIComponent(url)}`;
+  video.src = getYouTubeStreamEndpoint(url);
   video.muted = true;
   video.loop = true;
   video.playsInline = true;
@@ -322,10 +340,32 @@ function loadYouTubeUrl(url) {
     });
   }, { once: true });
 
-  video.addEventListener('error', () => {
-    console.error('YouTube stream failed to load.');
+  video.addEventListener('error', async () => {
+    await reportYouTubeStreamError(url);
     clearVideoSource();
   }, { once: true });
+}
+
+function getYouTubeStreamEndpoint(url) {
+  return `/api/youtube-stream?url=${encodeURIComponent(url)}`;
+}
+
+async function reportYouTubeStreamError(url) {
+  try {
+    const response = await fetch(getYouTubeStreamEndpoint(url));
+    const contentType = response.headers.get('content-type') || '';
+
+    if (!response.ok && contentType.includes('application/json')) {
+      const data = await response.json();
+      console.error('YouTube stream failed to load:', data.error || `Request failed with status ${response.status}`);
+      return;
+    }
+  } catch (err) {
+    console.error('YouTube stream failed to load:', err);
+    return;
+  }
+
+  console.error('YouTube stream failed to load.');
 }
 
 function getYouTubeVideoId(url) {
@@ -371,7 +411,7 @@ function enterVideoScene() {
   if (object) scene.remove(object);
 
   previousSceneBackground = scene.background;
-  scene.background = videoSceneBackground;
+  scene.background = getVideoSceneBackground();
   controls.enabled = false;
   controls.target.set(0, 0, 0);
   camera.position.set(0, 0, 0);
@@ -416,6 +456,7 @@ function clearVideoSource(options = {}) {
     scene.add(object);
   }
 
+  updateVideoPresentation();
   updateRenderVisibility();
 }
 
@@ -450,6 +491,25 @@ function updateRenderVisibility() {
   controls.domElement = useAscii ? effect.domElement : renderer.domElement;
 }
 
+function getVideoSceneBackground() {
+  return asciiSettings.videoWhiteBackground ? lightVideoSceneBackground : darkVideoSceneBackground;
+}
+
+function updateVideoPresentation() {
+  const useLightVideoBackground = Boolean(activeVideoElement) && asciiSettings.videoWhiteBackground;
+
+  effect.domElement.style.backgroundColor = useLightVideoBackground ? 'white' : 'black';
+  effect.domElement.style.color = useLightVideoBackground ? 'black' : 'white';
+
+  if (activeVideoElement) {
+    scene.background = getVideoSceneBackground();
+  }
+}
+
+function setDownloadCallout(message = '') {
+  downloadCallout.textContent = message;
+}
+
 async function downloadRenderedVideo() {
   if (isRecording) return;
 
@@ -464,39 +524,98 @@ async function downloadRenderedVideo() {
   const chunks = [];
   const duration = getRecordingDuration();
   const previousLoop = activeVideoElement?.loop;
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 
   isRecording = true;
+  setDownloadCallout('Recording video...');
 
-  recorder.addEventListener('dataavailable', (event) => {
-    if (event.data.size > 0) chunks.push(event.data);
+  const recordingStopped = new Promise((resolve, reject) => {
+    recorder.addEventListener('dataavailable', (event) => {
+      if (event.data.size > 0) chunks.push(event.data);
+    });
+
+    recorder.addEventListener('error', (event) => {
+      reject(event.error || new Error('Recording failed.'));
+    });
+
+    recorder.addEventListener('stop', () => {
+      resolve(new Blob(chunks, { type: recorder.mimeType }));
+    });
   });
 
-  recorder.addEventListener('stop', () => {
-    const blob = new Blob(chunks, { type: recorder.mimeType });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `ascii-render-${new Date().toISOString().replace(/[:.]/g, '-')}.webm`;
-    anchor.click();
-    URL.revokeObjectURL(url);
+  try {
+    if (activeVideoElement) {
+      activeVideoElement.loop = false;
+      await restartVideoForRecording(activeVideoElement);
+    }
+
+    recorder.start();
+
+    window.setTimeout(() => {
+      if (recorder.state === 'recording') recorder.stop();
+      stream.getTracks().forEach(track => track.stop());
+    }, duration * 1000);
+
+    const recordedBlob = await recordingStopped;
+    setDownloadCallout('Converting to mp4...');
+
+    const mp4Blob = await convertRecordingToMp4(recordedBlob);
+    downloadBlob(mp4Blob, `ascii-render-${timestamp}.mp4`);
+  } catch (err) {
+    console.error('Video export failed:', err);
+    stream.getTracks().forEach(track => track.stop());
+  } finally {
     isRecording = false;
+    setDownloadCallout('');
 
     if (activeVideoElement && previousLoop !== undefined) {
       activeVideoElement.loop = previousLoop;
     }
-  });
+  }
+}
 
-  if (activeVideoElement) {
-    activeVideoElement.loop = false;
-    await restartVideoForRecording(activeVideoElement);
+async function convertRecordingToMp4(recordedBlob) {
+  let response;
+
+  try {
+    response = await fetch('/api/export-mp4', {
+      method: 'POST',
+      headers: {
+        'Content-Type': recordedBlob.type || 'video/webm'
+      },
+      body: recordedBlob
+    });
+  } catch (err) {
+    if (err instanceof TypeError) {
+      throw new Error('Could not reach the local export server. Restart `npm run dev` and try the download again.');
+    }
+
+    throw err;
   }
 
-  recorder.start();
+  if (!response.ok) {
+    let message = `MP4 conversion failed with status ${response.status}`;
 
-  window.setTimeout(() => {
-    if (recorder.state === 'recording') recorder.stop();
-    stream.getTracks().forEach(track => track.stop());
-  }, duration * 1000);
+    try {
+      const data = await response.json();
+      if (data?.error) message = data.error;
+    } catch {
+      // Fall back to the default error message when the response is not JSON.
+    }
+
+    throw new Error(message);
+  }
+
+  return response.blob();
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 function getSupportedRecorderOptions() {
