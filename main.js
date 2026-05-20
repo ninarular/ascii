@@ -171,6 +171,7 @@ const asciiSettings = {
   resolutionScale: 1,
   webcam: false,
   videoWhiteBackground: false,
+  videoSpeed: 1,
   widthScale: 1,
   heightScale: 1,
   exportDuration: 10,
@@ -195,6 +196,7 @@ gui.add(asciiSettings, 'widthScale', 0.5, 2).step(0.1).name('Width Scale').onCha
 gui.add(asciiSettings, 'heightScale', 0.5, 2).step(0.1).name('Height Scale').onChange(updateAsciiDisplaySize);
 gui.add(asciiSettings, 'webcam').name('Use Webcam for ASCII').onChange(toggleWebcamAscii);
 gui.add(asciiSettings, 'videoWhiteBackground').name('White Video Background').onChange(updateVideoPresentation);
+gui.add(asciiSettings, 'videoSpeed', 0.25, 3).step(0.05).name('Video Speed').onChange(updateVideoPlaybackRate);
 gui.add(asciiSettings, 'exportDuration', 1, 120).step(1).name('Export Duration (s)');
 gui.add(asciiSettings, 'uploadMp4').name('Upload MP4 Video');
 gui.add(asciiSettings, 'downloadRenderedVideo').name('Download Rendered Video');
@@ -221,6 +223,12 @@ function updateAsciiColorMode(useColor) {
   updateVideoPresentation();
 
   updateRenderVisibility();
+}
+
+function updateVideoPlaybackRate() {
+  if (!activeVideoElement) return;
+  activeVideoElement.playbackRate = asciiSettings.videoSpeed;
+  activeVideoElement.defaultPlaybackRate = asciiSettings.videoSpeed;
 }
 
 let videoStream = null;
@@ -295,6 +303,7 @@ function setVideoSource(video) {
   removeYouTubeFrame();
   removeVideoPlane();
   activeVideoElement = video;
+  updateVideoPlaybackRate();
 
   videoTexture = new THREE.VideoTexture(video);
   videoTexture.colorSpace = THREE.SRGBColorSpace;
